@@ -11,6 +11,7 @@
 #include "CurrentControl.h"
 #include "BLDCMotor.h"
 #include "foc_utils.h"
+#include "pid.h"
 
 /* ---- GB4310 motor + loop configuration -------------------------------- */
 #define MOTOR_R_OHM         10.32f      /* phase resistance                */
@@ -39,47 +40,14 @@ extern volatile uint8_t beepPlaying;
 
 typedef struct
 {
-  float kp;
-  float ki;
-  float limit;
-  float integral;
-  float error_prev;
-} PI_t;
-
-typedef struct
-{
   float k;
   float y;
 } LPF_t;
 
-static PI_t  pi_d;
-static PI_t  pi_q;
+static PID_t pid_d;
+static PID_t pid_q;
 static LPF_t lpf_d;
 static LPF_t lpf_q;
-
-static void PI_Reset(PI_t *p, float kp, float ki, float limit)
-{
-  p->kp = kp;
-  p->ki = ki;
-  p->limit = limit;
-  p->integral = 0.0f;
-  p->error_prev = 0.0f;
-}
-
-/* Tustin integral + output clamp (same structure as SimpleFOC PIDController) */
-static float PI_Step(PI_t *p, float error)
-{
-  float u;
-
-  p->integral += p->ki * CURRENT_TS * 0.5f * (error + p->error_prev);
-  p->integral = _constrain(p->integral, -p->limit, p->limit);
-
-  u = p->kp * error + p->integral;
-  u = _constrain(u, -p->limit, p->limit);
-
-  p->error_prev = error;
-  return u;
-}
 
 static void LPF_Init(LPF_t *f)
 {
@@ -95,8 +63,8 @@ static float LPF_Step(LPF_t *f, float x)
 
 void CurrentControl_Init(void)
 {
-  PI_Reset(&pi_d, CURRENT_KP, CURRENT_KI, CURRENT_ULIMIT);
-  PI_Reset(&pi_q, CURRENT_KP, CURRENT_KI, CURRENT_ULIMIT);
+  PID_Init(&pid_d, CURRENT_KP, CURRENT_KI, 0.0f, 0.0f, CURRENT_ULIMIT);
+  PID_Init(&pid_q, CURRENT_KP, CURRENT_KI, 0.0f, 0.0f, CURRENT_ULIMIT);
   LPF_Init(&lpf_d);
   LPF_Init(&lpf_q);
 
@@ -112,8 +80,8 @@ void CurrentControl_Enable(uint8_t enable)
 
   if (enable == 0U)
   {
-    PI_Reset(&pi_d, CURRENT_KP, CURRENT_KI, CURRENT_ULIMIT);
-    PI_Reset(&pi_q, CURRENT_KP, CURRENT_KI, CURRENT_ULIMIT);
+    PID_Reset(&pid_d);
+    PID_Reset(&pid_q);
     LPF_Init(&lpf_d);
     LPF_Init(&lpf_q);
   }
@@ -159,8 +127,8 @@ void CurrentControl_Update(float ia, float ib, float theta_e)
   current_q = iq;
 
   /* d/q PI */
-  ud = PI_Step(&pi_d, 0.0f - id);
-  uq = PI_Step(&pi_q, iq_ref - iq);
+  ud = PID_Update(&pid_d, 0.0f - id, CURRENT_TS);
+  uq = PID_Update(&pid_q, iq_ref - iq, CURRENT_TS);
 
   /* Limit the voltage vector (linear SVPWM limit is Vbus/sqrt(3) = 13.9 V) */
   umag = _sqrt(ud * ud + uq * uq);

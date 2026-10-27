@@ -32,6 +32,9 @@
 #include "FOCMotor.h"
 #include "BLDCMotor.h"
 #include "CurrentControl.h"
+#include "SpeedControl.h"
+#include "PositionControl.h"
+#include "Commander.h"
 #include "Vofa.h"
 #include "beep.h"
 /* USER CODE END Includes */
@@ -59,9 +62,25 @@
 /* 1 = d/q current closed loop (torque in A), 0 = voltage mode (torque in V) */
 #define USE_CURRENT_LOOP      1
 
+/* 1 = outer speed loop (target in rad/s, PI output = iq reference).
+   Requires USE_CURRENT_LOOP == 1. */
+#define USE_SPEED_LOOP        1
+
+#if USE_SPEED_LOOP && !USE_CURRENT_LOOP
+#error "USE_SPEED_LOOP requires USE_CURRENT_LOOP"
+#endif
+
+/* 1 = outer position loop (target in rad, output = speed reference).
+   Requires USE_SPEED_LOOP == 1. */
+#define USE_POSITION_LOOP     1
+
+#if USE_POSITION_LOOP && !USE_SPEED_LOOP
+#error "USE_POSITION_LOOP requires USE_SPEED_LOOP"
+#endif
+
 /* VOFA+ JustFloat telemetry on USART1 (115200 8N1) */
 #define VOFA_SEND_CH          3U    /* floats per frame, <= VOFA_MAX_CH */
-#define PRINT_PERIOD_MS       5U   /* frame period in ms               */
+#define PRINT_PERIOD_MS       10U   /* frame period in ms               */
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -73,7 +92,9 @@
 
 /* USER CODE BEGIN PV */
 volatile float motor_target_voltage = 1.0f;   /* V, voltage mode only */
-volatile float motor_target_current = 0.2f;   /* A, iq reference       */
+volatile float motor_target_current = 0.2f;   /* A, direct torque mode */
+volatile float motor_target_speed = 10.0f;    /* rad/s (~95 rpm), speed mode */
+volatile float motor_target_position = 0.0f;  /* rad (multi-turn), position mode */
 
 /* ADC1 injected results: rank1 = CH5 (U7 / R9), rank2 = CH6 (U10 / R12) */
 volatile uint16_t adc_raw_a = 0U;
@@ -84,6 +105,7 @@ volatile float phase_current_c = 0.0f;
 volatile uint32_t adc_sample_count = 0U;
 
 static uint8_t current_loop_div = 0U;
+static uint32_t speed_tick = 0U;
 
 uint32_t last_print_tick = 0U;
 
@@ -138,8 +160,16 @@ static void SimpleFOC_Init(void)
   voltage_limit = 4.0f;
   voltage_sensor_align = 4.0f;
 
-  controller = Type_torque;
   CurrentControl_Init();
+  SpeedControl_Init();
+  PositionControl_Init();
+#if USE_POSITION_LOOP
+  controller = Type_angle;
+#elif USE_SPEED_LOOP
+  controller = Type_velocity;
+#else
+  controller = Type_torque;
+#endif
 #if USE_CURRENT_LOOP
   torque_controller = Type_foc_current;
 #else
@@ -194,6 +224,13 @@ int main(void)
   MX_TIM4_Init();
   /* USER CODE BEGIN 2 */
   SimpleFOC_Init();
+  Commander_Init();
+  speed_tick = HAL_GetTick();
+
+#if USE_POSITION_LOOP
+  /* Hold the position we are at after alignment instead of jumping to 0 */
+  motor_target_position = shaft_angle;
+#endif
 
   /* USER CODE END 2 */
 
@@ -201,9 +238,34 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    CurrentControl_SetTarget(motor_target_current);
-    setTargetVotage(motor_target_voltage);
+    Commander_Poll();
     loopFOC();
+
+#if USE_SPEED_LOOP
+    /* Outer speed loop at ~1 kHz: PI output is the iq reference */
+    {
+      uint32_t now = HAL_GetTick();
+      if (now != speed_tick)
+      {
+        float dt = (float)(now - speed_tick) * 0.001f;
+        speed_tick = now;
+
+        shaft_velocity = getVelocity();
+
+#if USE_POSITION_LOOP
+        /* position P -> speed reference (limited inside PositionControl) */
+        PositionControl_SetTarget(motor_target_position);
+        SpeedControl_SetTarget(PositionControl_Update(shaft_angle, dt));
+#else
+        SpeedControl_SetTarget(motor_target_speed);
+#endif
+        CurrentControl_SetTarget(SpeedControl_Update(shaft_velocity, dt));
+      }
+    }
+#else
+    CurrentControl_SetTarget(motor_target_current);
+#endif
+    setTargetVotage(motor_target_voltage);
 
     /* VOFA+ JustFloat telemetry: fill vofa_data[] with the channels you want */
     if ((HAL_GetTick() - last_print_tick) >= PRINT_PERIOD_MS)
