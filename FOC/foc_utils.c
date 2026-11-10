@@ -2,10 +2,10 @@
 #include <stdint.h>
 
 /***************************************************************************/
-// 65 element sine lookup table with linear interpolation (from SimpleFOC 2.4)
-// 16 bit precision on sine value, 8 bit fractional value for interpolation,
-// 6 bit LUT size. RMS difference vs stdlib sine: 0.00006480 over [0, 2PI).
-// Angle must be in [0, 2PI).
+// 含 65 个元素的正弦查找表，使用线性插值（来自 SimpleFOC 2.4）
+// 正弦值精度为 16 位，插值小数部分为 8 位，
+// 查表索引为 6 位；在 [0, 2PI) 内相对标准库正弦函数的均方根误差为 0.00006480。
+// 输入角度必须位于 [0, 2PI)。
 float _sin(float a){
   static const uint16_t sine_array[65] = {0,804,1608,2411,3212,4011,4808,5602,6393,7180,7962,8740,9512,10279,11039,11793,12540,13279,14010,14733,15447,16151,16846,17531,18205,18868,19520,20160,20788,21403,22006,22595,23170,23732,24279,24812,25330,25833,26320,26791,27246,27684,28106,28511,28899,29269,29622,29957,30274,30572,30853,31114,31357,31581,31786,31972,32138,32286,32413,32522,32610,32679,32729,32758,32768};
   int32_t t1, t2;
@@ -27,36 +27,36 @@ float _sin(float a){
   return (1.0f/32768.0f) * (t1 + (((t2 - t1) * frac) >> 8));
 }
 /***************************************************************************/
-// function approximating cosine calculation by using fixed size array
-// precision +-0.005
-// it has to receive an angle in between 0 and 2PI
+// 利用固定大小的查找表近似计算余弦值
+// 精度为 ±0.005
+// 输入角度必须位于 0 到 2PI 之间
 float _cos(float a){
   float a_sin = a + _PI_2;
   a_sin = a_sin > _2PI ? a_sin - _2PI : a_sin;
   return _sin(a_sin);
 }
 /***************************************************************************/
-// function returning both sine and cosine of the angle in one call
+// 一次调用同时计算角度的正弦值和余弦值
 void _sincos(float a, float* s, float* c){
   *s = _sin(a);
   *c = _cos(a);
 }
 /***************************************************************************/
-// normalizing radian angle to [0,2PI]
+// 将弧度角归一化到 [0, 2PI)
 float _normalizeAngle(float angle){
   float a = fmod(angle, _2PI);
   return a >= 0 ? a : (a + _2PI);
 }
 /***************************************************************************/
-// Electrical angle calculation
+// 计算电角度
 float _electricalAngle(float shaft_angle, int pole_pairs) {
   return (shaft_angle * pole_pairs);
 }
 /***************************************************************************/
-// square root approximation function using
+// 平方根近似计算，算法参考：
 // https://reprap.org/forum/read.php?147,219210
 // https://en.wikipedia.org/wiki/Fast_inverse_square_root
-float _sqrtApprox(float number) {//low in fat
+float _sqrtApprox(float number) {//轻量级近似计算
   union {
     float    f;
     uint32_t i;

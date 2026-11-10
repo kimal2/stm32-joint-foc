@@ -1,7 +1,7 @@
 /**
   ******************************************************************************
   * @file    pid.c
-  * @brief   Reusable PID controller (C port of SimpleFOC 2.4 PIDController).
+  * @brief   通用 PID 控制器（SimpleFOC 2.4 PIDController 的 C 语言移植）
   ******************************************************************************
   */
 
@@ -51,7 +51,7 @@ float PID_Update(PID_t *pid, float error, float dt)
 
   proportional = pid->P * error;
 
-  /* Tustin: u_ik = u_ik_1 + I*dt/2*(ek + ek_1) */
+  /* Tustin 梯形积分：u_ik = u_ik_1 + I*dt/2*(ek + ek_1) */
   integral = pid->integral_prev +
              pid->I * dt * 0.5f * (error + pid->error_prev);
   if (pid->limit > 0.0f)
@@ -67,7 +67,7 @@ float PID_Update(PID_t *pid, float error, float dt)
     output = _constrain(output, -pid->limit, pid->limit);
   }
 
-  /* Optional output slew-rate limit */
+  /* 可选的输出变化率限制 */
   if (pid->output_ramp > 0.0f)
   {
     float rate = (output - pid->output_prev) / dt;

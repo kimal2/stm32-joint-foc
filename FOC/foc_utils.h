@@ -4,14 +4,14 @@
 #include <math.h>
 
 /******************************************************************************/
-// sign function
+// 符号函数
 #define _sign(a) ( ( (a) < 0 )  ?  -1   : ( (a) > 0 ) )
 #define _round(x) ((x)>=0?(long)((x)+0.5):(long)((x)-0.5))
 #define _constrain(amt,low,high) ((amt)<(low)?(low):((amt)>(high)?(high):(amt)))
 #define _sqrt(a) (_sqrtApprox(a))
 #define _isset(a) ( (a) != (NOT_SET) )
 
-// utility defines
+// 常用数学常量
 #define _2_SQRT3 1.15470053838
 #define _SQRT3 1.73205080757
 #define _1_SQRT3 0.57735026919
@@ -25,20 +25,20 @@
 #define _3PI_2 4.71238898038
 #define _PI_6 0.52359877559
 /******************************************************************************/
-// dq current structure 
+// d/q 轴电流结构体
 typedef struct 
 {
 	float d;
 	float q;
 } DQCurrent_s;
-// phase current structure 
+// 三相电流结构体
 typedef struct 
 {
 	float a;
 	float b;
 	float c;
 } PhaseCurrent_s;
-// dq voltage structs
+// d/q 轴电压结构体
 typedef struct 
 {
 	float d;

@@ -1,14 +1,14 @@
 /**
   ******************************************************************************
   * @file    beep.c
-  * @brief   "Beeper" using the motor windings, ported from the sample project
+  * @brief   利用电机绕组实现蜂鸣，移植自示例项目
   ******************************************************************************
-  * TIM4 is configured as a 1 MHz time base (72 MHz / 72).
-  * ARR = period_us / 2, so the update interrupt toggles the voltage vector
-  * every half period; the winding current then vibrates at 1 / period_us.
+  * TIM4 配置为 1 MHz 时基（72 MHz / 72）。
+  * ARR = period_us / 2，更新中断每半个周期切换一次电压矢量，
+  * 从而使绕组电流以 1 / period_us 对应的频率振荡。
   *
-  * The sample checks "target voltage == 0" before beeping so that the beep
-  * does not fight the normal FOC output.
+  * 蜂鸣输出前检查目标电压是否为 0，
+  * 以免与正常 FOC 输出冲突。
   ******************************************************************************
   */
 
@@ -17,15 +17,15 @@
 #include "foc_utils.h"
 #include "BLDCMotor.h"
 
-/* Referenced by loopFOC() in BLDCMotor.c */
+/* 由 BLDCMotor.c 的 loopFOC() 及电流环读取 */
 volatile uint8_t beepPlaying = 0;
 
-/* Defined in main.c */
+/* 定义在 main.c 中 */
 extern volatile float motor_target_voltage;
 
 void Beep_Init(void)
 {
-  /* 72 MHz / (71 + 1) = 1 MHz, one timer tick = 1 us */
+  /* 72 MHz / (71 + 1) = 1 MHz，定时器每计数一次对应 1 微秒 */
   __HAL_TIM_SET_PRESCALER(&htim4, 71U);
 
   HAL_NVIC_SetPriority(TIM4_IRQn, 5, 0);
@@ -59,10 +59,10 @@ void Beep_PlayNotes(uint8_t num, const uint16_t notes[][2])
 }
 
 /*
- * TIM4 update callback (called from the generated TIM4_IRQHandler via
- * HAL_TIM_IRQHandler). The vector alternates between 0 deg and 60 deg,
- * which is enough to make the winding current audible without producing
- * net torque.
+ * TIM4 更新回调：由生成的 TIM4_IRQHandler 经 HAL_TIM_IRQHandler 调用。
+ * 电压矢量在 0 度和 60 度之间交替切换，
+ * 使绕组电流产生可听声音，
+ * 以期不产生净转矩。
  */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {

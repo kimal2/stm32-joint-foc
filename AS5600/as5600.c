@@ -1,10 +1,10 @@
 /**
   ******************************************************************************
   * @file    as5600.c
-  * @brief   AS5600 magnetic rotary encoder driver (hardware I2C1)
+  * @brief   AS5600 磁旋转编码器驱动（硬件 I2C1）
   ******************************************************************************
-  * Reads the 12-bit RAW ANGLE register (0x0C/0x0D, 0..4095 = 0..360 deg)
-  * and keeps it in globals so it can be watched in the debugger.
+  * 读取 12 位原始角度寄存器（0x0C/0x0D，0..4095 对应 0..360 度），
+  * 并将结果保存在全局变量中，方便调试器实时观察。
   ******************************************************************************
   */
 
@@ -13,10 +13,10 @@
 #define AS5600_I2C_ADDR       ((uint16_t)(AS5600_ADDR7 << 1))   /* 0x6C */
 #define AS5600_CPR            4096U
 #define AS5600_TWO_PI         6.28318530718f
-#define AS5600_I2C_TIMEOUT    5U    /* ms */
+#define AS5600_I2C_TIMEOUT    5U    /* 毫秒 */
 #define AS5600_READ_RETRIES   3U
 
-/* Globals -- watch these in the debugger */
+/* 全局变量，可在调试器中观察 */
 volatile uint16_t as5600_raw_angle = 0;
 volatile float    as5600_angle_rad = 0.0f;
 volatile float    as5600_angle_deg = 0.0f;
@@ -25,7 +25,7 @@ volatile uint8_t  as5600_error = 1;
 
 static I2C_HandleTypeDef *s_hi2c = NULL;
 
-/* Read a 16-bit big-endian register pair, return 0xFFFF on failure. */
+/* 读取一对大端寄存器组成的 16 位数据，失败时返回 0xFFFF。 */
 static uint16_t AS5600_ReadTwoBytes(uint8_t reg)
 {
   uint8_t buf[2];

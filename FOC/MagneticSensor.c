@@ -1,9 +1,9 @@
 /************************************************
- * AS5600 magnetic sensor wrapper for the ported SimpleFOC code.
+ * 为移植后的 SimpleFOC 封装 AS5600 磁编码器接口。
  *
- * The original sample used bit-banged I2C on PB6/PB7. This board already
- * has I2C1 (PB6/PB7) configured and verified, so the same public API is
- * implemented on top of the hardware driver in Devices/as5600.c.
+ * 原示例在 PB6/PB7 上使用软件 I2C；本板已配置并验证
+ * 硬件 I2C1（PB6/PB7），因此保持公共接口一致，
+ * 底层改用 AS5600/as5600.c 中的硬件驱动。
  ************************************************/
 
 #include "MagneticSensor.h"
@@ -21,8 +21,8 @@ float angle_prev;
 /******************************************************************************/
 #define AS5600_CPR 4096
 
-/* Velocity estimation: angle difference over the HAL tick (1 ms), then a
-   first order low-pass filter. Tf = 10 ms -> ~16 Hz cutoff. */
+/* 速度估算：根据 HAL 毫秒时基计算角度差分，再进行
+   一阶低通滤波，Tf = 10 ms，对应约 16 Hz 截止频率。 */
 #define VELOCITY_LPF_TF 0.01f
 
 static float   angle_cont = 0.0f;
@@ -31,8 +31,8 @@ static float   angle_vel_prev = 0.0f;
 static uint32_t vel_tick_prev = 0U;
 static uint8_t  vel_init = 0U;
 
-/* Sensor direction is calibrated by alignSensor() in BLDCMotor.c.
-   Multiplying by it puts the velocity in the shaft (FOC) frame. */
+/* 传感器方向由 BLDCMotor.c 中的 alignSensor() 校准。
+   速度乘以该方向系数后，与机械轴（FOC）的正方向一致。 */
 extern long sensor_direction;
 
 void MagneticSensor_Init(void)
@@ -58,18 +58,18 @@ void MagneticSensor_Init(void)
 }
 
 /*
- * Returns a continuous mechanical angle in radians: it tracks how many full
- * rotations the sensor has made, so the range is not limited to 0..2*pi.
+ * 返回连续的机械角度，单位 rad；通过跟踪传感器的整圈转数，
+ * 使角度范围不再局限于 0 到 2*pi。
  */
 float getAngle(void)
 {
   uint16_t raw;
   long d_angle;
 
-  /* Use the shared driver update so as5600_* debug globals stay fresh too */
+  /* 调用共用驱动更新函数，同时更新 as5600_* 调试变量 */
   if (AS5600_Update() != 0)
   {
-    /* I2C error: keep the last value instead of injecting a bogus angle */
+    /* I2C 读取失败时沿用上一次角度，避免引入错误角度 */
     raw = (uint16_t)angle_data_prev;
   }
   else
@@ -80,7 +80,7 @@ float getAngle(void)
   angle_data = (long)(raw & 0x0FFFU);
   d_angle = angle_data - angle_data_prev;
 
-  /* Detect the 0 <-> 4095 wrap and account for one full rotation */
+  /* 检测 0 与 4095 之间的跨圈跳变，并补偿一整圈角度 */
   if (fabsf((float)d_angle) > 0.8f * (float)cpr)
   {
     full_rotation_offset += (d_angle > 0) ? -_2PI : _2PI;
@@ -94,8 +94,8 @@ float getAngle(void)
 }
 
 /*
- * Mechanical shaft velocity in rad/s (in the FOC/shaft direction).
- * Call it at a fixed-ish rate (the main loop does it once per millisecond).
+ * 机械轴速度，单位 rad/s，正方向与 FOC 机械轴方向一致。
+ * 需要估算速度时，应先更新角度，再按较稳定的周期调用。
  */
 float getVelocity(void)
 {

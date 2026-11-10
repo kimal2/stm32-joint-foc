@@ -1,12 +1,12 @@
 /**
   ******************************************************************************
   * @file    as5600.h
-  * @brief   AS5600 magnetic rotary encoder driver (hardware I2C1)
+  * @brief   AS5600 磁旋转编码器驱动（硬件 I2C1）
   ******************************************************************************
-  * Wiring (from schematic netlist):
+  * 硬件连接（依据原理图网络表）：
   *   AS5600 SCL (U6.7) -> PB6  (I2C1_SCL)
   *   AS5600 SDA (U6.6) -> PB7  (I2C1_SDA)
-  *   3.3V supply, 4.7K pull-ups on both lines.
+  *   3.3 V 供电，两条总线均使用 4.7 千欧上拉电阻。
   ******************************************************************************
   */
 
@@ -21,26 +21,26 @@ extern "C" {
 #include "i2c.h"
 #include <stdint.h>
 
-/* 7-bit I2C address of AS5600 */
+/* AS5600 的 7 位 I2C 地址 */
 #define AS5600_ADDR7              0x36U
 
-/* Register map (relevant subset) */
+/* 本驱动使用的寄存器地址 */
 #define AS5600_REG_STATUS         0x0BU
 #define AS5600_REG_RAW_ANGLE_H    0x0CU
 #define AS5600_REG_ANGLE_H        0x0EU
 
-/* STATUS register bits */
-#define AS5600_STATUS_MH          (1U << 3)   /* magnet too strong */
-#define AS5600_STATUS_ML          (1U << 4)   /* magnet too weak   */
-#define AS5600_STATUS_MD          (1U << 5)   /* magnet detected   */
+/* STATUS 寄存器位定义 */
+#define AS5600_STATUS_MH          (1U << 3)   /* 磁场过强 */
+#define AS5600_STATUS_ML          (1U << 4)   /* 磁场过弱   */
+#define AS5600_STATUS_MD          (1U << 5)   /* 已检测到磁铁   */
 
 /*
- * Globals for live debugging in the IDE.
- *   as5600_raw_angle   : 0..4095, updated by AS5600_Update()
- *   as5600_angle_rad   : 0..2*pi, same value converted
- *   as5600_angle_deg   : 0..360, same value converted
- *   as5600_status      : raw STATUS register (0x0B)
- *   as5600_error       : 0 = last I2C transaction OK, 1 = failed
+ * 用于 IDE 实时调试的全局变量。
+ *   as5600_raw_angle   ：原始角度 0..4095，由 AS5600_Update() 更新
+ *   as5600_angle_rad   ：换算后的弧度值，范围 0..2*pi
+ *   as5600_angle_deg   ：换算后的角度值，范围 0..360
+ *   as5600_status      ：STATUS 寄存器（0x0B）原始值
+ *   as5600_error       ：最近一次 I2C 通信结果，0 = 成功，1 = 失败
  */
 extern volatile uint16_t as5600_raw_angle;
 extern volatile float    as5600_angle_rad;
@@ -48,13 +48,13 @@ extern volatile float    as5600_angle_deg;
 extern volatile uint8_t  as5600_status;
 extern volatile uint8_t  as5600_error;
 
-/* Initialize driver; returns 0 on success, 1 if the sensor does not answer. */
+/* 初始化驱动，成功返回 0，传感器无响应时返回 1。 */
 uint8_t AS5600_Init(I2C_HandleTypeDef *hi2c);
 
-/* Read one fresh sample into the globals above; returns 0 on success. */
+/* 读取一次新数据并更新上述全局变量，成功返回 0。 */
 uint8_t AS5600_Update(void);
 
-/* Raw register access helpers. Return 0xFFFF on error. */
+/* 原始寄存器访问接口；16 位角度读取失败时返回 0xFFFF。 */
 uint16_t AS5600_ReadRawAngle(void);
 uint16_t AS5600_ReadAngle(void);
 uint8_t  AS5600_ReadStatus(void);

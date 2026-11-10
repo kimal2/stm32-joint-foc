@@ -2,8 +2,8 @@
 /**
   ******************************************************************************
   * @file         stm32f1xx_hal_msp.c
-  * @brief        This file provides code for the MSP Initialization
-  *               and de-Initialization codes.
+  * @brief        本文件提供底层硬件资源的初始化
+  *               和反初始化代码。
   ******************************************************************************
   * @attention
   *

@@ -3,13 +3,13 @@
 
 /******************************************************************************/
 /**
- *  Direction structure
+ *  旋转方向枚举
  */
 typedef enum
 {
-    CW      = 1,  //clockwise
-    CCW     = -1, // counter clockwise
-    UNKNOWN = 0   //not yet known or invalid state
+    CW      = 1,  //顺时针
+    CCW     = -1, // 逆时针
+    UNKNOWN = 0   //方向未知或状态无效
 } Direction;
 
 /******************************************************************************/
@@ -18,8 +18,6 @@ extern float voltage_power_supply;
 extern float voltage_limit;
 extern float voltage_sensor_align;
 extern int  pole_pairs;
-extern unsigned long open_loop_timestamp;
-extern float velocity_limit;
 /******************************************************************************/
 void Motor_init(void);
 void Motor_initFOC(void);

@@ -2,8 +2,8 @@
 /**
   ******************************************************************************
   * @file           : main.h
-  * @brief          : Header for main.c file.
-  *                   This file contains the common defines of the application.
+  * @brief          : main.c 的头文件
+  *                   本文件包含应用程序共用的定义。
   ******************************************************************************
   * @attention
   *

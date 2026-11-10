@@ -1,87 +1,91 @@
 cmake_minimum_required(VERSION 3.22)
 
 #
-# This file is generated only once,
-# and is not re-generated if converter is called multiple times.
+# 本文件只生成一次，
+# 后续重复调用转换器时不会重新生成。
 #
-# User is free to modify the file as much as necessary
+# 用户可按需要修改本文件
 #
 
-# Setup compiler settings
+# 设置编译器选项
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS ON)
 
 
-# Define the build type
+# 设置构建类型
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Debug")
 endif()
 
-# Set the project name
+# 设置项目名称
 set(CMAKE_PROJECT_NAME Joint)
 
-# Enable compile command to ease indexing with e.g. clangd
+# 导出编译命令，便于 clangd 等工具建立代码索引
 set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 
-# Core project settings
+# 项目基础配置
 project(${CMAKE_PROJECT_NAME})
 message("Build type: " ${CMAKE_BUILD_TYPE})
 
-# Enable CMake support for ASM and C languages
+# 启用 CMake 的汇编及 C 语言支持
 enable_language(C ASM)
 
-# Create an executable object type
+# 创建可执行目标
 add_executable(${CMAKE_PROJECT_NAME})
 
-# Add STM32CubeMX generated sources
+# 添加 STM32CubeMX 生成的源文件
 add_subdirectory(cmake/stm32cubemx)
 
-# Link directories setup
+# 接入 ARM GCC 的 Cortex-M3 定点数学库
+add_subdirectory(ThirdParty/IQMath)
+
+# 默认试用 IQmath 电流环；设为 OFF 可恢复原浮点实现，对比 DWT 原始周期数。
+option(FOC_USE_IQMATH "Use IQmath Q20 current control" ON)
+if(FOC_USE_IQMATH)
+    target_sources(${CMAKE_PROJECT_NAME} PRIVATE FOC/CurrentControlIQ.c)
+else()
+    target_sources(${CMAKE_PROJECT_NAME} PRIVATE FOC/CurrentControl.c)
+endif()
+
+# 设置链接目录
 target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
-    # Add user defined library search paths
+    # 在此添加用户库搜索路径
 )
 
-# Add sources to executable
+# 为可执行目标添加源文件
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
-    # Add user sources here
+    # 在此添加用户源文件
     ${CMAKE_CURRENT_SOURCE_DIR}/AS5600/as5600.c
     
     ${CMAKE_CURRENT_SOURCE_DIR}/FOC/BLDCMotor.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/FOC/Commander.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/FOC/CurrentControl.c
     ${CMAKE_CURRENT_SOURCE_DIR}/FOC/FOCMotor.c
     ${CMAKE_CURRENT_SOURCE_DIR}/FOC/MagneticSensor.c
     ${CMAKE_CURRENT_SOURCE_DIR}/FOC/pid.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/FOC/PositionControl.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/FOC/SpeedControl.c
     ${CMAKE_CURRENT_SOURCE_DIR}/FOC/beep.c
     ${CMAKE_CURRENT_SOURCE_DIR}/FOC/foc_utils.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/FOC/retarget.c
     ${CMAKE_CURRENT_SOURCE_DIR}/FOC/FlashStorage.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/FOC/Vofa.c
 )
 
-# Add include paths
+# 添加头文件搜索路径
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
-    # Add user defined include paths
+    # 在此添加用户头文件搜索路径
     ${CMAKE_CURRENT_SOURCE_DIR}/AS5600
     ${CMAKE_CURRENT_SOURCE_DIR}/FOC
 )
 
-# Add project symbols (macros)
+# 添加项目预处理宏
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
-    # Add user defined symbols
+    # 在此添加用户预处理宏
 )
 
-# Remove wrong libob.a library dependency when using cpp files
+# 使用 C++ 文件时移除错误的 libob.a 库依赖
 list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob)
 
-# Add linked libraries
+# 添加链接库
 target_link_libraries(${CMAKE_PROJECT_NAME}
     stm32cubemx
+    IQMath::IQMath
 
-    # Add user defined libraries
+    # 在此添加用户链接库
 )
-
-target_link_options(${CMAKE_PROJECT_NAME} PRIVATE -u _printf_float)

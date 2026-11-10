@@ -2,11 +2,11 @@
 #include <string.h>
 
 /*
- * STM32F103C8T6: 64KB flash, 1KB per page.
- * Original sample used pages 30/31 (0x08007800/0x08007C00), but the ported
- * FOC image is already larger than 30KB, so those pages now contain program
- * code. Store the parameters in the last two pages instead.
- * IMPORTANT: keep the firmware image below 0x0800F800 (62KB).
+ * STM32F103C8T6：Flash 容量为 64 KB，每页 1 KB。
+ * 原示例使用第 30/31 页（0x08007800/0x08007C00），但移植后的
+ * FOC 固件已超过 30 KB，这些页面已被程序占用，
+ * 因此将参数改存到最后两页。
+ * 注意：固件必须位于 0x0800F800（62 KB）以下，避免覆盖参数区。
  */
 #define FLASH_STORAGE_PARAM_ADDR 0x0800F800 //第62页：电机结构参数
 #define FLASH_STORAGE_ID_ADDR    0x0800FC00 //第63页：电机ID

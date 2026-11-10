@@ -2,7 +2,7 @@
 /**
   ******************************************************************************
   * @file           : main.c
-  * @brief          : Main program body
+  * @brief          : 主程序
   ******************************************************************************
   * @attention
   *
@@ -22,20 +22,15 @@
 #include "can.h"
 #include "i2c.h"
 #include "tim.h"
-#include "usart.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include <stdio.h>
 #include "MagneticSensor.h"
 #include "FOCMotor.h"
 #include "BLDCMotor.h"
 #include "CurrentControl.h"
-#include "SpeedControl.h"
-#include "PositionControl.h"
-#include "Commander.h"
-#include "Vofa.h"
+#include "CurrentControlConfig.h"
 #include "beep.h"
 /* USER CODE END Includes */
 
@@ -47,40 +42,25 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 /*
- * Current sense: INA199A1 (gain 50 V/V) on a 20 mOhm shunt,
- * REF = 1.65 V (R8/R10 divider), ADC 12 bit with VDDA = 3.3 V.
- *   Vout = 1.65 V + 50 * 0.020 * I   ->   1 V per A
- * With IN+ = GND and IN- = PGND, Vout drops while the low side conducts,
- * so (Vout - 1.65 V) is already the phase current flowing into the motor.
+ * 电流采样：INA199A1（增益 50 V/V），采样电阻为 20 毫欧，
+ * 参考电压为 1.65 V（R8/R10 分压），ADC 为 12 位，VDDA = 3.3 V。
+ *   Vout = 1.65 V + 50 * 0.020 * I，即每安培电流对应 1 V 电压变化。
+ * IN+ 接 GND、IN- 接 PGND，低侧导通时输出电压下降，
+ * 开机实测两路零电流 ADC 均值，后续减去各自零点后换算相电流。
  */
 #define ADC_VREF_V            3.3f
 #define ADC_FULL_SCALE        4096.0f
-#define CURRENT_OFFSET_V      1.65f
-#define CURRENT_V_PER_A       1.0f      /* 50 V/V * 0.020 ohm */
+#define CURRENT_V_PER_A       1.0f      /* 50 V/V * 0.020 欧姆 */
 #define CURRENT_SENSE_SIGN    (1.0f)
+#define CURRENT_OFFSET_SAMPLES       1024U
+#define CURRENT_OFFSET_SETTLE_MS     20U
+#define CURRENT_OFFSET_TIMEOUT_MS    500U
+#define CURRENT_OFFSET_MIN_V         1.40f  /* 标称 1.65 V，允许 ±0.25 V 偏差 */
+#define CURRENT_OFFSET_MAX_V         1.90f
 
-/* 1 = d/q current closed loop (torque in A), 0 = voltage mode (torque in V) */
+/* 1 = d/q 电流闭环（目标单位 A），0 = 电压模式（目标单位 V） */
 #define USE_CURRENT_LOOP      1
 
-/* 1 = outer speed loop (target in rad/s, PI output = iq reference).
-   Requires USE_CURRENT_LOOP == 1. */
-#define USE_SPEED_LOOP        1
-
-#if USE_SPEED_LOOP && !USE_CURRENT_LOOP
-#error "USE_SPEED_LOOP requires USE_CURRENT_LOOP"
-#endif
-
-/* 1 = outer position loop (target in rad, output = speed reference).
-   Requires USE_SPEED_LOOP == 1. */
-#define USE_POSITION_LOOP     1
-
-#if USE_POSITION_LOOP && !USE_SPEED_LOOP
-#error "USE_POSITION_LOOP requires USE_SPEED_LOOP"
-#endif
-
-/* VOFA+ JustFloat telemetry on USART1 (115200 8N1) */
-#define VOFA_SEND_CH          3U    /* floats per frame, <= VOFA_MAX_CH */
-#define PRINT_PERIOD_MS       10U   /* frame period in ms               */
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -91,12 +71,10 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-volatile float motor_target_voltage = 1.0f;   /* V, voltage mode only */
-volatile float motor_target_current = 0.2f;   /* A, direct torque mode */
-volatile float motor_target_speed = 10.0f;    /* rad/s (~95 rpm), speed mode */
-volatile float motor_target_position = 0.0f;  /* rad (multi-turn), position mode */
+volatile float motor_target_voltage = 1.0f;   /* 单位 V，用于电压模式及蜂鸣门控 */
+volatile float motor_target_current = 0.06f;   /* 单位 A，直接作为 q 轴目标电流 */
 
-/* ADC1 injected results: rank1 = CH5 (U7 / R9), rank2 = CH6 (U10 / R12) */
+/* ADC1 注入组采样结果：序列 1 = CH5（U7 / R9），序列 2 = CH6（U10 / R12） */
 volatile uint16_t adc_raw_a = 0U;
 volatile uint16_t adc_raw_b = 0U;
 volatile float phase_current_a = 0.0f;
@@ -104,10 +82,17 @@ volatile float phase_current_b = 0.0f;
 volatile float phase_current_c = 0.0f;
 volatile uint32_t adc_sample_count = 0U;
 
-static uint8_t current_loop_div = 0U;
-static uint32_t speed_tick = 0U;
+/* 零点单位为 ADC 计数，可带小数；上电重新采集，不写入 Flash。 */
+volatile float current_offset_adc_a = 0.0f;
+volatile float current_offset_adc_b = 0.0f;
+/* 0 = 未校准，1 = 采集中，2 = 校准成功，3 = 校准失败。 */
+volatile uint8_t current_offset_status = 0U;
+volatile uint32_t current_offset_sample_count = 0U;
+static volatile uint32_t current_offset_sum_a = 0U;
+static volatile uint32_t current_offset_sum_b = 0U;
 
-uint32_t last_print_tick = 0U;
+static uint8_t current_loop_div = 0U;
+
 
 /* USER CODE END PV */
 
@@ -119,57 +104,104 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+static HAL_StatusTypeDef CurrentSense_CalibrateOffset(void)
+{
+  uint32_t start_tick;
+  float offset_a;
+  float offset_b;
+  const float min_adc = CURRENT_OFFSET_MIN_V * (ADC_FULL_SCALE / ADC_VREF_V);
+  const float max_adc = CURRENT_OFFSET_MAX_V * (ADC_FULL_SCALE / ADC_VREF_V);
+
+  /* 必须在电机静止、没有相电流时执行，驱动保持关闭直到校准通过。 */
+  HAL_GPIO_WritePin(DRV_EN_GPIO_Port, DRV_EN_Pin, GPIO_PIN_RESET);
+  CurrentControl_Enable(0U);
+  current_offset_status = 0U;
+  HAL_Delay(CURRENT_OFFSET_SETTLE_MS);
+  current_offset_sum_a = 0U;
+  current_offset_sum_b = 0U;
+  current_offset_sample_count = 0U;
+  start_tick = HAL_GetTick();
+  current_offset_status = 1U;
+
+  /* 只累加新的注入组采样；达到指定次数后，中断不再修改累加结果。 */
+  while (current_offset_sample_count < CURRENT_OFFSET_SAMPLES)
+  {
+    if ((HAL_GetTick() - start_tick) >= CURRENT_OFFSET_TIMEOUT_MS)
+    {
+      current_offset_status = 3U;
+      return HAL_TIMEOUT;
+    }
+  }
+
+  offset_a = (float)current_offset_sum_a / (float)CURRENT_OFFSET_SAMPLES;
+  offset_b = (float)current_offset_sum_b / (float)CURRENT_OFFSET_SAMPLES;
+  if ((offset_a < min_adc) || (offset_a > max_adc) ||
+      (offset_b < min_adc) || (offset_b > max_adc))
+  {
+    current_offset_status = 3U;
+    return HAL_ERROR;
+  }
+
+  current_offset_adc_a = offset_a;
+  current_offset_adc_b = offset_b;
+  current_loop_div = 0U;
+  current_offset_status = 2U;
+  return HAL_OK;
+}
+
 static void SimpleFOC_Init(void)
 {
   uint32_t period = __HAL_TIM_GET_AUTORELOAD(&htim2) + 1U;
 
+  HAL_GPIO_WritePin(DRV_EN_GPIO_Port, DRV_EN_Pin, GPIO_PIN_RESET);
+  CurrentControl_Init();
+
   /*
-   * Enable CCR preload so duty updates are latched at the timer update event.
-   * With center-aligned PWM this avoids asymmetric pulses when the FOC loop
-   * writes a new CCR in the middle of a period.
+   * 使能 CCR 预装载，在定时器更新事件发生时统一更新占空比。
+   * 配合中心对齐 PWM，可避免 FOC 在周期中途修改 CCR 时
+   * 产生不对称的脉冲。
    */
   __HAL_TIM_ENABLE_OCxPRELOAD(&htim2, TIM_CHANNEL_1);
   __HAL_TIM_ENABLE_OCxPRELOAD(&htim2, TIM_CHANNEL_2);
   __HAL_TIM_ENABLE_OCxPRELOAD(&htim2, TIM_CHANNEL_3);
 
-  /* Zero voltage vector before enabling the driver */
+  /* 使能驱动器前先输出零电压矢量 */
   __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, period / 2U);
   __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, period / 2U);
   __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, period / 2U);
-  htim2.Instance->EGR = TIM_EGR_UG;   /* latch the preloaded CCR values */
+  htim2.Instance->EGR = TIM_EGR_UG;   /* 将预装载的 CCR 值更新到有效寄存器 */
 
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3);
 
   /*
-   * CH4 has no pin: it only generates OC4REF, which is routed to
-   * TIM2 TRGO and triggers the ADC1 injected group once per PWM period.
+   * CH4 不输出到引脚，仅生成 OC4REF 信号，并将其路由到
+   * TIM2 TRGO，每个 PWM 周期触发一次 ADC1 注入组采样。
    */
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_4);
 
-  /* Current sensing: calibrate once, then let TIM2 TRGO run the injected group */
-  HAL_ADCEx_Calibration_Start(&hadc1);
-  HAL_ADCEx_InjectedStart_IT(&hadc1);
+  /* 电流采样：先执行一次 ADC 校准，再由 TIM2 TRGO 触发注入组转换 */
+  if ((HAL_ADCEx_Calibration_Start(&hadc1) != HAL_OK) ||
+      (HAL_ADCEx_InjectedStart_IT(&hadc1) != HAL_OK))
+  {
+    current_offset_status = 3U;
+    Error_Handler();
+  }
 
-  /* AS5600 through the verified hardware I2C1 driver */
+  if (CurrentSense_CalibrateOffset() != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /* 通过已验证的硬件 I2C1 驱动读取 AS5600 */
   MagneticSensor_Init();
 
-  /* FOC parameters for this board: 24V bus, 4310 motor */
+  /* 本板 FOC 参数：24 V 母线、4310 电机 */
   voltage_power_supply = 24.0f;
   voltage_limit = 4.0f;
   voltage_sensor_align = 4.0f;
 
-  CurrentControl_Init();
-  SpeedControl_Init();
-  PositionControl_Init();
-#if USE_POSITION_LOOP
-  controller = Type_angle;
-#elif USE_SPEED_LOOP
-  controller = Type_velocity;
-#else
-  controller = Type_torque;
-#endif
 #if USE_CURRENT_LOOP
   torque_controller = Type_foc_current;
 #else
@@ -180,7 +212,7 @@ static void SimpleFOC_Init(void)
   Motor_initFOC();
 
 #if USE_CURRENT_LOOP
-  /* Enable only after the sensor alignment, which drives the phases directly. */
+  /* 传感器校准会直接驱动电机各相，因此校准结束后才使能电流环。 */
   CurrentControl_SetTarget(0.0f);
   CurrentControl_Enable(1U);
 #endif
@@ -220,17 +252,12 @@ int main(void)
   MX_CAN_Init();
   MX_I2C1_Init();
   MX_TIM2_Init();
-  MX_USART1_UART_Init();
   MX_TIM4_Init();
   /* USER CODE BEGIN 2 */
-  SimpleFOC_Init();
-  Commander_Init();
-  speed_tick = HAL_GetTick();
 
-#if USE_POSITION_LOOP
-  /* Hold the position we are at after alignment instead of jumping to 0 */
-  motor_target_position = shaft_angle;
-#endif
+  HAL_Delay(800);//上电等待800ms，等电压稳定
+
+  SimpleFOC_Init();
 
   /* USER CODE END 2 */
 
@@ -238,47 +265,11 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    Commander_Poll();
     loopFOC();
 
-#if USE_SPEED_LOOP
-    /* Outer speed loop at ~1 kHz: PI output is the iq reference */
-    {
-      uint32_t now = HAL_GetTick();
-      if (now != speed_tick)
-      {
-        float dt = (float)(now - speed_tick) * 0.001f;
-        speed_tick = now;
-
-        shaft_velocity = getVelocity();
-
-#if USE_POSITION_LOOP
-        /* position P -> speed reference (limited inside PositionControl) */
-        PositionControl_SetTarget(motor_target_position);
-        SpeedControl_SetTarget(PositionControl_Update(shaft_angle, dt));
-#else
-        SpeedControl_SetTarget(motor_target_speed);
-#endif
-        CurrentControl_SetTarget(SpeedControl_Update(shaft_velocity, dt));
-      }
-    }
-#else
     CurrentControl_SetTarget(motor_target_current);
-#endif
     setTargetVotage(motor_target_voltage);
 
-    /* VOFA+ JustFloat telemetry: fill vofa_data[] with the channels you want */
-    if ((HAL_GetTick() - last_print_tick) >= PRINT_PERIOD_MS)
-    {
-      float vofa_data[VOFA_SEND_CH];
-      last_print_tick = HAL_GetTick();
-
-      vofa_data[0] = phase_current_a;
-      vofa_data[1] = phase_current_b;
-      vofa_data[2] = phase_current_c;
-
-      VOFA_Send(vofa_data, VOFA_SEND_CH);
-    }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -334,15 +325,12 @@ void SystemClock_Config(void)
 
 /* USER CODE BEGIN 4 */
 /*
- * Runs at the PWM rate (20 kHz), once per TIM2 TRGO.
- * The trigger sits right before the counter peak, i.e. inside the window
- * where all three low-side FETs are on, so the PGND shunts carry current.
+ * 以 PWM 频率（20 kHz）运行，每次 TIM2 TRGO 触发后执行一次。
+ * 触发点位于计数器峰值前，此时处于三相低侧 MOS 管
+ * 同时导通的窗口，电流流经 PGND 采样电阻。
  */
 void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef *hadc)
 {
-  float volts_a;
-  float volts_b;
-
   if (hadc->Instance != ADC1)
   {
     return;
@@ -351,35 +339,42 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef *hadc)
   adc_raw_a = (uint16_t)HAL_ADCEx_InjectedGetValue(hadc, ADC_INJECTED_RANK_1);
   adc_raw_b = (uint16_t)HAL_ADCEx_InjectedGetValue(hadc, ADC_INJECTED_RANK_2);
 
-  volts_a = (float)adc_raw_a * (ADC_VREF_V / ADC_FULL_SCALE);
-  volts_b = (float)adc_raw_b * (ADC_VREF_V / ADC_FULL_SCALE);
-
-  phase_current_a = CURRENT_SENSE_SIGN * (volts_a - CURRENT_OFFSET_V) / CURRENT_V_PER_A;
-  phase_current_b = CURRENT_SENSE_SIGN * (volts_b - CURRENT_OFFSET_V) / CURRENT_V_PER_A;
-
-  /*
-   * Only two shunts are populated (U7 on PGND1, U10 on PGND2), so phase C is
-   * reconstructed from Kirchhoff's current law: Ia + Ib + Ic = 0.
-   * Keep the same sign convention as the two measured phases.
-   */
-  phase_current_c = -(phase_current_a + phase_current_b);
-
   adc_sample_count++;
 
-  /* d/q current loop at 5 kHz (every 4th 20 kHz sample), synchronized to PWM */
-  if (++current_loop_div >= 4U)
+  if (current_offset_status == 1U)
   {
-    current_loop_div = 0U;
-    CurrentControl_Update(phase_current_a, phase_current_b, electrical_angle);
+    if (current_offset_sample_count < CURRENT_OFFSET_SAMPLES)
+    {
+      current_offset_sum_a += adc_raw_a;
+      current_offset_sum_b += adc_raw_b;
+      current_offset_sample_count++;
+    }
+  }
+  else if (current_offset_status == 2U)
+  {
+    phase_current_a = CURRENT_SENSE_SIGN * ((float)adc_raw_a - current_offset_adc_a)
+                    * (ADC_VREF_V / ADC_FULL_SCALE / CURRENT_V_PER_A);
+    phase_current_b = CURRENT_SENSE_SIGN * ((float)adc_raw_b - current_offset_adc_b)
+                    * (ADC_VREF_V / ADC_FULL_SCALE / CURRENT_V_PER_A);
+
+    /* 两路实测电流重构 C 相：Ia + Ib + Ic = 0。 */
+    phase_current_c = -(phase_current_a + phase_current_b);
+
+    /* 每 2 次约 20 kHz 采样执行一次，电流环约 10 kHz。 */
+    if (++current_loop_div >= CURRENT_ADC_DECIMATION)
+    {
+      current_loop_div = 0U;
+      CurrentControl_Update(phase_current_a, phase_current_b, electrical_angle);
+    }
   }
 
   /*
-   * STM32F1 HAL quirk (stm32f1xx_hal_adc.c, HAL_ADC_IRQHandler): when the
-   * regular group is configured for software start + single conversion
-   * (which is the case here, since the regular group is disabled), the HAL
-   * disables the JEOC interrupt after the first injected conversion.
-   * The hardware itself keeps converting on every TIM2 TRGO, so just re-arm
-   * the interrupt. Clearing JEOC first avoids a spurious re-entry.
+   * STM32F1 HAL 的特殊处理（stm32f1xx_hal_adc.c 中的 HAL_ADC_IRQHandler）：
+   * 常规组配置为软件启动、单次转换时，
+   * （本项目未启用常规组，配置正是如此），HAL 会在
+   * 首次注入组转换后关闭 JEOC 中断。
+   * 硬件仍会在每次 TIM2 TRGO 时进行转换，因此只需重新使能中断。
+   * 使能前先清除 JEOC 标志，以免误触发再次进入中断。
    */
   __HAL_ADC_CLEAR_FLAG(hadc, ADC_FLAG_JEOC);
   __HAL_ADC_ENABLE_IT(hadc, ADC_IT_JEOC);
@@ -393,7 +388,7 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef *hadc)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
+  /* 可在此处添加代码，报告 HAL 返回的错误状态 */
   __disable_irq();
   while (1)
   {
@@ -411,8 +406,7 @@ void Error_Handler(void)
 void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */
-  /* User can add his own implementation to report the file name and line number,
-     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+  /* 可在调试器中查看 file 和 line，定位断言失败的位置。 */
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
