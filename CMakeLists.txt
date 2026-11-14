@@ -40,13 +40,8 @@ add_subdirectory(cmake/stm32cubemx)
 # 接入 ARM GCC 的 Cortex-M3 定点数学库
 add_subdirectory(ThirdParty/IQMath)
 
-# 默认试用 IQmath 电流环；设为 OFF 可恢复原浮点实现，对比 DWT 原始周期数。
-option(FOC_USE_IQMATH "Use IQmath Q20 current control" ON)
-if(FOC_USE_IQMATH)
-    target_sources(${CMAKE_PROJECT_NAME} PRIVATE FOC/CurrentControlIQ.c)
-else()
-    target_sources(${CMAKE_PROJECT_NAME} PRIVATE FOC/CurrentControl.c)
-endif()
+# 电流环统一使用 IQmath Q20 实现。
+target_sources(${CMAKE_PROJECT_NAME} PRIVATE Components/FOC/CurrentControlIQ.c)
 
 # 设置链接目录
 target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
@@ -56,22 +51,29 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 # 为可执行目标添加源文件
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # 在此添加用户源文件
-    ${CMAKE_CURRENT_SOURCE_DIR}/AS5600/as5600.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/APP/MotorApp.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/APP/CanApp.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Components/CAN/CanTransport.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Components/AS5600/as5600.c
     
-    ${CMAKE_CURRENT_SOURCE_DIR}/FOC/BLDCMotor.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/FOC/FOCMotor.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/FOC/MagneticSensor.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/FOC/pid.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/FOC/beep.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/FOC/foc_utils.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/FOC/FlashStorage.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Components/FOC/FOC.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Components/FOC/MagneticSensor.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/Filter/KalmanFilter.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Components/Motor/Motorbeep.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Components/FOC/foc_utils.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Components/Flash/FlashStorage.c
 )
 
 # 添加头文件搜索路径
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # 在此添加用户头文件搜索路径
-    ${CMAKE_CURRENT_SOURCE_DIR}/AS5600
-    ${CMAKE_CURRENT_SOURCE_DIR}/FOC
+    ${CMAKE_CURRENT_SOURCE_DIR}/APP
+    ${CMAKE_CURRENT_SOURCE_DIR}/Components/CAN
+    ${CMAKE_CURRENT_SOURCE_DIR}/Components/AS5600
+    ${CMAKE_CURRENT_SOURCE_DIR}/Components/FOC
+    ${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/Filter
+    ${CMAKE_CURRENT_SOURCE_DIR}/Components/Motor
+    ${CMAKE_CURRENT_SOURCE_DIR}/Components/Flash
 )
 
 # 添加项目预处理宏

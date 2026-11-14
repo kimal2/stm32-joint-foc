@@ -1,6 +1,6 @@
 /**
   ******************************************************************************
-  * @file    beep.c
+  * @file    Motorbeep.c
   * @brief   利用电机绕组实现蜂鸣，移植自示例项目
   ******************************************************************************
   * TIM4 配置为 1 MHz 时基（72 MHz / 72）。
@@ -12,15 +12,15 @@
   ******************************************************************************
   */
 
-#include "beep.h"
+#include "Motorbeep.h"
 #include "tim.h"
 #include "foc_utils.h"
-#include "BLDCMotor.h"
+#include "FOC.h"
 
-/* 由 BLDCMotor.c 的 loopFOC() 及电流环读取 */
+/* 由 FOC.c 的 loopFOC() 及电流环读取 */
 volatile uint8_t beepPlaying = 0;
 
-/* 定义在 main.c 中 */
+/* 定义在 APP/MotorApp.c 中 */
 extern volatile float motor_target_voltage;
 
 void Beep_Init(void)

@@ -31,8 +31,8 @@ Q24 的有符号数范围为 [-128, 128)，不适合直接保存所有 PI 增益
 
 ## 当前电流环
 
-`FOC/CurrentControlIQ.c` 使用显式 Q20 运算，默认由 CMake 的
-`FOC_USE_IQMATH=ON` 选择。共用参数保存在 `FOC/CurrentControlConfig.h`：
+电流环统一使用 `Components/FOC/CurrentControlIQ.c` 中的显式 Q20 实现，
+参数保存在 `Components/FOC/CurrentControlConfig.h`，已移除浮点备用版和通用 PID：
 
 - 环内的 Clarke/Park、低通滤波、PI、矢量限幅和 SVPWM 均使用 Q20。
 - 电流环约 10 kHz（20 kHz ADC 采样二分频），周期为 100 微秒；
@@ -49,21 +49,14 @@ Q24 的有符号数范围为 [-128, 128)，不适合直接保存所有 PI 增益
 Ozone 中继续查看 `current_loop_cycles`：它只记录原始 DWT 周期差值，
 包含本次格式转换、环内计算及 PWM 更新，不换算微秒。
 
-切换回原浮点电流环进行对比：
+构建当前 IQmath 电流环：
 
 ```powershell
-cmake --preset Debug -DFOC_USE_IQMATH=OFF
+cmake --preset Debug
 cmake --build --preset Debug
 ```
 
-恢复 IQmath 版：
-
-```powershell
-cmake --preset Debug -DFOC_USE_IQMATH=ON
-cmake --build --preset Debug
-```
-
-两种构建均保持项目原有的 Debug `-O0` 配置，便于比较。更改算法后需要重新烧录，
+当前构建保持项目原有的 Debug `-O0` 配置。更改算法后需要重新烧录，
 实际加速比以目标板 DWT 测量为准。
 
 主机数值检查：`python tests/validate_current_iq.py`。该检查使用实际控制源码，

@@ -5,7 +5,7 @@
  */
 #include "CurrentControl.h"
 #include "CurrentControlConfig.h"
-#include "BLDCMotor.h"
+#include "FOC.h"
 #include "IQmathLib.h"
 #include "stm32f1xx.h"
 #include "tim.h"
@@ -185,9 +185,11 @@ void CurrentControl_Update(float ia, float ib, float theta_e)
   s = _IQ20sin(theta);
   c = _IQ20cos(theta);
 
+  /* Clarke 变换：两相实测电流转换为静止坐标系 alpha/beta 电流。 */
   alpha = ia_iq;
   beta = _IQ20mpy(IQ_INV_SQRT3, ia_iq) +
          _IQ20mpy(2 * IQ_INV_SQRT3, ib_iq);
+  /* Park 变换：用转子电角度得到 d/q 电流，再滤波后送入 PI。 */
   id = _IQ20mpy(alpha, c) + _IQ20mpy(beta, s);
   iq = -_IQ20mpy(alpha, s) + _IQ20mpy(beta, c);
 
@@ -196,9 +198,11 @@ void CurrentControl_Update(float ia, float ib, float theta_e)
   current_d = _IQ20toF(lpf_d);
   current_q = _IQ20toF(lpf_q);
 
+  /* d 轴目标为 0，q 轴目标来自 CAN 指令；PI 输出为 d/q 轴电压。 */
   ud = CurrentPI_Update(&pi_d, -lpf_d);
   uq = CurrentPI_Update(&pi_q, iq_ref - lpf_q);
 
+  /* 两轴合成电压超限时等比例缩小，保持电压矢量方向。 */
   magnitude_squared = _IQ20mpy(ud, ud) + _IQ20mpy(uq, uq);
   if (magnitude_squared > IQ_ULIMIT_SQUARED)
   {

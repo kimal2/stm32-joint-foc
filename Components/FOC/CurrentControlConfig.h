@@ -1,7 +1,7 @@
 #ifndef CURRENT_CONTROL_CONFIG_H
 #define CURRENT_CONTROL_CONFIG_H
 
-/* 浮点版与 IQmath 版共用参数，避免切换实现时改变电流环整定。 */
+/* IQmath 电流环参数，常量在编译时转换为 Q20。 */
 #define MOTOR_R_OHM         10.32f
 #define MOTOR_L_H           0.00326f
 #define CURRENT_BW_HZ       200.0f

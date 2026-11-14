@@ -7,6 +7,7 @@
  ************************************************/
 
 #include "MagneticSensor.h"
+#include "KalmanFilter.h"
 #include "foc_utils.h"
 #include "as5600.h"
 #include "i2c.h"
@@ -21,6 +22,19 @@ float angle_prev;
 /******************************************************************************/
 #define AS5600_CPR 4096
 
+/* 参考项目的上报角度参数；每次有效更新加入一次 Q，最快每 1 ms 更新。
+ * 增大 R 或减小 Q 会增强平滑，同时增加上报角度滞后。
+ */
+#define REPORT_ANGLE_KALMAN_Q 0.0005f
+#define REPORT_ANGLE_KALMAN_R 0.1f
+#define REPORT_ANGLE_PERIOD_MS 1U
+
+volatile float encoder_angle_unfiltered_rad = 0.0f;
+volatile float encoder_angle_report_rad = 0.0f;
+static KalmanFilter report_angle_filter;
+static uint32_t report_angle_tick = 0U;
+static uint8_t report_angle_initialized = 0U;
+
 /* 速度估算：根据 HAL 毫秒时基计算角度差分，再进行
    一阶低通滤波，Tf = 10 ms，对应约 16 Hz 截止频率。 */
 #define VELOCITY_LPF_TF 0.01f
@@ -31,7 +45,7 @@ static float   angle_vel_prev = 0.0f;
 static uint32_t vel_tick_prev = 0U;
 static uint8_t  vel_init = 0U;
 
-/* 传感器方向由 BLDCMotor.c 中的 alignSensor() 校准。
+/* 传感器方向由 FOC.c 中的 alignSensor() 校准。
    速度乘以该方向系数后，与机械轴（FOC）的正方向一致。 */
 extern long sensor_direction;
 
@@ -55,6 +69,39 @@ void MagneticSensor_Init(void)
   velocity_filtered = 0.0f;
   angle_vel_prev = 0.0f;
   vel_init = 0U;
+  encoder_angle_unfiltered_rad = 0.0f;
+  encoder_angle_report_rad = 0.0f;
+  report_angle_tick = 0U;
+  report_angle_initialized = 0U;
+}
+
+/* 主循环读取编码器并计算 shaft_angle 后调用，不在中断中访问 I2C。
+ * 输入已完成跨圈展开、方向及机械零位处理；不回写控制用角度。
+ */
+void MagneticSensor_UpdateReportAngle(float mechanical_angle)
+{
+  uint32_t now;
+
+  /* 通信失败不把沿用的旧角度当作新测量，保持滤波状态。 */
+  if (as5600_error != 0U) return;
+
+  encoder_angle_unfiltered_rad = mechanical_angle;
+  now = HAL_GetTick();
+  if (report_angle_initialized == 0U)
+  {
+    KalmanFilter_Init(&report_angle_filter, REPORT_ANGLE_KALMAN_Q,
+                      REPORT_ANGLE_KALMAN_R, mechanical_angle);
+    encoder_angle_report_rad = mechanical_angle;
+    report_angle_tick = now;
+    report_angle_initialized = 1U;
+    return;
+  }
+
+  if ((now - report_angle_tick) >= REPORT_ANGLE_PERIOD_MS)
+  {
+    report_angle_tick = now;
+    encoder_angle_report_rad = KalmanFilter_Update(&report_angle_filter, mechanical_angle);
+  }
 }
 
 /*

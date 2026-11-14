@@ -27,7 +27,7 @@ extern volatile float current_q;
 
 /* 最近一次有效电流环计算的原始 CPU 周期数，不换算时间单位。
  * 不含 ADC 采样换算、中断进出及电流环入口检查；未执行电流环时保留上次值。
- * IQmath 版包含浮点接口与 Q20 的格式转换；由 CMake 的 FOC_USE_IQMATH 选择实现。
+ * 包含浮点接口与 Q20 的格式转换，电流环统一采用 IQmath 实现。
  */
 extern volatile uint32_t current_loop_cycles;
 

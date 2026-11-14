@@ -4,8 +4,7 @@
 本项目删除了部分代码，添加了Flash数据读取和对蜂鸣功能的兼容
 ************************************************/
 
-#include "BLDCMotor.h"
-#include "FOCMotor.h"
+#include "FOC.h"
 #include "foc_utils.h"
 #include "gpio.h"
 #include "MagneticSensor.h"
@@ -29,6 +28,30 @@ float voltage_power_supply;
 float voltage_limit;
 float voltage_sensor_align;
 int  pole_pairs;
+
+TorqueControlType torque_controller;
+
+float shaft_angle;//!< 当前电机机械角度
+float electrical_angle;
+float current_sp;
+DQVoltage_s voltage;
+DQCurrent_s current;
+
+
+float sensor_offset=0;
+float zero_electric_angle;
+/******************************************************************************/
+// 计算机械轴角度
+float shaftAngle(void)
+{
+  return sensor_direction*getAngle() - sensor_offset;
+}
+/******************************************************************************/
+float electricalAngle(void)
+{
+  return _normalizeAngle((shaft_angle + sensor_offset) * pole_pairs - zero_electric_angle);
+}
+/******************************************************************************/
 
 int alignSensor(void);
 /******************************************************************************/
@@ -132,21 +155,11 @@ void loopFOC(void)
 {
 	shaft_angle = shaftAngle();// 机械轴角度
 	electrical_angle = electricalAngle();// 电角度计算前必须先调用 shaftAngle
+	MagneticSensor_UpdateReportAngle(shaft_angle); // 仅更新上报角度，不影响换相
 
-	// d/q 电流模式下，由 ADC 中断中的电流环更新 PWM（CurrentControl.c）
+	// d/q 电流模式下，由 ADC 中断中的电流环更新 PWM（CurrentControlIQ.c）
 	if(torque_controller == Type_foc_current) return;
 
-	switch(torque_controller)
-	{
-		case Type_voltage:  // 电压模式无需额外处理
-			break;
-		case Type_dc_current:
-			break;
-		case Type_foc_current:
-			break;
-		default:
-			break;
-	}
 	// 设置相电压，这是 FOC 输出的核心步骤
 	extern volatile uint8_t beepPlaying;
 	if(beepPlaying == 0) //没在蜂鸣状态则正常输出电压
